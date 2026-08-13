@@ -6,7 +6,18 @@ services:
     environment:
       - LLM_MOCK=true
       - MASSIVE_API_KEY=
-      - DB_PATH=/tmp/test.db
+      # Not /tmp: the rest of the image's /tmp is ordinary container filesystem,
+      # which survives a stop/start. See the tmpfs below.
+      - DB_PATH=/db/test.db
+    # The "Fresh start" scenario asserts an untouched $10,000 portfolio, so the
+    # database must be empty at the start of every run. `docker compose up`
+    # without `down` REUSES the existing app container, and a plain container
+    # filesystem keeps whatever the previous run traded — the second run then
+    # fails with the first run's cash balance. Docker clears a tmpfs when the
+    # container stops, so mounting the database directory as tmpfs makes each
+    # run start clean whether the container is new or restarted.
+    tmpfs:
+      - /db
     ports:
       - "8000:8000"
     healthcheck:
