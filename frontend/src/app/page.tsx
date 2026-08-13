@@ -11,7 +11,7 @@ import PnlChart from "@/components/PnlChart";
 import PositionsTable from "@/components/PositionsTable";
 import TradeBar from "@/components/TradeBar";
 import { useMarketData } from "@/hooks/useMarketData";
-import { api, type PortfolioResponse } from "@/lib/api";
+import { api, ApiError, type PortfolioResponse } from "@/lib/api";
 
 function usePortfolio() {
   const [portfolio, setPortfolio] = useState<PortfolioResponse>({
@@ -58,7 +58,11 @@ function useWatchlist() {
 
   const addTicker = useCallback((ticker: string) => {
     setTickers((prev) => [...prev, ticker]);
-    api.addTicker(ticker).catch(() => {
+    api.addTicker(ticker).catch((err: unknown) => {
+      // A 409 means the server already holds this ticker, so the row on screen
+      // is real. Rolling it back would delete a legitimate entry — the one the
+      // still-in-flight initial load is about to supply.
+      if (err instanceof ApiError && err.status === 409) return;
       setTickers((prev) => prev.filter((t) => t !== ticker));
     });
   }, []);
