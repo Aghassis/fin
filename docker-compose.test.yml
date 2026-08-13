@@ -10,7 +10,15 @@ services:
     ports:
       - "8000:8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      # The image is python:3.12-slim + uv and has no curl, so probe with the
+      # stdlib instead of adding a package layer. urlopen raises on any non-2xx,
+      # matching `curl -f`. 127.0.0.1 rather than localhost: the server falls
+      # back to an IPv4-only socket on kernels without IPv6 (see app/server.py).
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/api/health").read()
       interval: 5s
       timeout: 3s
       retries: 10
