@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.market.cache import price_cache
+from app.market.tracking import register_watched_ticker, unregister_watched_ticker
 
 router = APIRouter(prefix="/api/watchlist", tags=["watchlist"])
 
@@ -74,8 +75,21 @@ async def add_ticker(body: AddTickerRequest):
             (str(uuid.uuid4()), ticker, now),
         )
         await db.commit()
+
+        # Start pricing it before responding so the row is never born priceless
+        register_watched_ticker(ticker)
+
         update = price_cache.get(ticker)
-        return WatchlistItem(ticker=ticker, price=update.price if update else None)
+        if update is None:
+            return WatchlistItem(ticker=ticker)
+        prev = update.previous_price
+        change_pct = ((update.price - prev) / prev * 100) if prev else None
+        return WatchlistItem(
+            ticker=ticker,
+            price=update.price,
+            previous_price=prev,
+            change_percent=round(change_pct, 2) if change_pct is not None else None,
+        )
     finally:
         await db.close()
 
@@ -93,6 +107,8 @@ async def remove_ticker(ticker: str):
         await db.commit()
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail=f"{ticker} not in watchlist")
+
+        await unregister_watched_ticker(db, ticker)
         return {"ok": True}
     finally:
         await db.close()

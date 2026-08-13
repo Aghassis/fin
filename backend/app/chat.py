@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from litellm import acompletion
 
 from app.database import get_db
+from app.market.tracking import register_watched_ticker, unregister_watched_ticker
 
 router = APIRouter()
 
@@ -303,25 +304,28 @@ async def _execute_trade(
 async def _execute_watchlist_change(db, ticker: str, action: str) -> str | None:
     """Add/remove a ticker from watchlist. Returns error string on failure."""
     now = datetime.now(timezone.utc).isoformat()
+    ticker_upper = ticker.upper().strip()
 
     if action == "add":
         try:
             await db.execute(
                 "INSERT INTO watchlist (id, user_id, ticker, added_at) VALUES (?, 'default', ?, ?)",
-                (str(uuid.uuid4()), ticker.upper(), now),
+                (str(uuid.uuid4()), ticker_upper, now),
             )
             await db.commit()
         except Exception:
             return f"{ticker} is already on the watchlist"
+        register_watched_ticker(ticker_upper)
 
     elif action == "remove":
         cur = await db.execute(
             "DELETE FROM watchlist WHERE user_id = 'default' AND ticker = ?",
-            (ticker.upper(),),
+            (ticker_upper,),
         )
         await db.commit()
         if cur.rowcount == 0:
             return f"{ticker} is not on the watchlist"
+        await unregister_watched_ticker(db, ticker_upper)
 
     return None
 
