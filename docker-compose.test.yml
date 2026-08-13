@@ -33,4 +33,12 @@ services:
     working_dir: /work
     volumes:
       - ./test:/work
-    command: npx playwright test
+      # Anonymous volume so `npm ci` writes node_modules inside the container
+      # instead of leaving a root-owned tree in the host's test/ directory.
+      - /work/node_modules
+    # playwright.config.ts imports @playwright/test, so the dep must exist in
+    # /work before the config loads — bare `npx playwright test` fetches only
+    # the CLI into npx's cache and dies with MODULE_NOT_FOUND. `npm ci` installs
+    # from test/package-lock.json, which pins 1.52.0 to match the browsers baked
+    # into this image (bumping one means bumping the other).
+    command: sh -c "npm ci && npx playwright test"
