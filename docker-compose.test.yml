@@ -22,6 +22,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 5s
 
   playwright:
     image: mcr.microsoft.com/playwright:v1.52.0-jammy
@@ -30,6 +31,9 @@ services:
         condition: service_healthy
     environment:
       - BASE_URL=http://app:8000
+      # Keep traces and error contexts out of the bind-mounted source tree.
+      - PLAYWRIGHT_OUTPUT_DIR=/tmp/test-results
+      - HOME=/tmp
     working_dir: /work
     volumes:
       - ./test:/work
