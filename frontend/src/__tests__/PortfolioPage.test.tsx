@@ -1,4 +1,11 @@
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  fireEvent,
+  act,
+  within,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MockEventSource } from "./helpers/mocks";
 
@@ -261,6 +268,73 @@ describe("Portfolio Page Integration", () => {
     await waitFor(() =>
       expect(screen.queryByText("TSLA")).not.toBeInTheDocument()
     );
+  });
+
+  it("keeps a ticker added while the initial watchlist load is in flight", async () => {
+    vi.mocked(api.getPortfolio).mockResolvedValue({
+      cash_balance: 10000.0,
+      total_value: 10000.0,
+      positions: [],
+    });
+    // The GET was issued before the POST, so its response cannot contain the
+    // new ticker. Resolving it must not wipe out the optimistic row (fin-8hh).
+    let resolveLoad!: (items: { ticker: string }[]) => void;
+    vi.mocked(api.getWatchlist).mockReturnValue(
+      new Promise((resolve) => {
+        resolveLoad = resolve;
+      })
+    );
+    vi.mocked(api.addTicker).mockResolvedValue({ ticker: "SNAP" });
+
+    render(<Home />);
+
+    const input = screen.getByPlaceholderText("Add ticker");
+    fireEvent.change(input, { target: { value: "snap" } });
+    await waitFor(() => expect(input).toHaveValue("snap"));
+    fireEvent.click(screen.getByRole("button", { name: "+" }));
+
+    expect(await screen.findByText("SNAP")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveLoad([{ ticker: "AAPL" }, { ticker: "GOOGL" }]);
+    });
+
+    const panel = within(screen.getByTestId("panel-watchlist"));
+    expect(panel.getByText("AAPL")).toBeInTheDocument();
+    expect(panel.getByText("GOOGL")).toBeInTheDocument();
+    expect(panel.getByText("SNAP")).toBeInTheDocument();
+  });
+
+  it("does not duplicate a ticker the initial watchlist load also returns", async () => {
+    vi.mocked(api.getPortfolio).mockResolvedValue({
+      cash_balance: 10000.0,
+      total_value: 10000.0,
+      positions: [],
+    });
+    let resolveLoad!: (items: { ticker: string }[]) => void;
+    vi.mocked(api.getWatchlist).mockReturnValue(
+      new Promise((resolve) => {
+        resolveLoad = resolve;
+      })
+    );
+    vi.mocked(api.addTicker).mockResolvedValue({ ticker: "AAPL" });
+
+    render(<Home />);
+
+    const input = screen.getByPlaceholderText("Add ticker");
+    fireEvent.change(input, { target: { value: "aapl" } });
+    await waitFor(() => expect(input).toHaveValue("aapl"));
+    fireEvent.click(screen.getByRole("button", { name: "+" }));
+
+    // Flush the load inside act() so the merge has definitely applied — a bare
+    // waitFor would pass on the pre-merge render even if the merge duplicated.
+    await act(async () => {
+      resolveLoad([{ ticker: "AAPL" }]);
+    });
+
+    expect(
+      within(screen.getByTestId("panel-watchlist")).getAllByText("AAPL")
+    ).toHaveLength(1);
   });
 
   it("handles API failure gracefully", async () => {

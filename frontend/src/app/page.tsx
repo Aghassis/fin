@@ -42,19 +42,30 @@ function usePortfolio() {
 function useWatchlist() {
   const [tickers, setTickers] = useState<string[]>([]);
 
-  const refresh = useCallback(async () => {
+  const load = useCallback(async (merge: boolean) => {
     try {
       const items = await api.getWatchlist();
-      setTickers(items.map((i) => i.ticker));
+      const loaded = items.map((i) => i.ticker);
+      setTickers((prev) =>
+        merge ? [...loaded, ...prev.filter((t) => !loaded.includes(t))] : loaded
+      );
     } catch {
       // API not available yet
     }
   }, []);
 
+  // An explicit refresh follows a write we know the server has already applied,
+  // so its response is authoritative and replaces what we hold.
+  const refresh = useCallback(() => load(false), [load]);
+
   useEffect(() => {
+    // The initial load merges instead: a ticker added while this fetch is still
+    // in flight is persisted server-side, but the response was built before
+    // that write and omits it. Replacing would drop the row for good, since
+    // nothing refetches the watchlist afterwards (fin-8hh).
     // eslint-disable-next-line react-hooks/set-state-in-effect -- async data fetch on mount
-    refresh();
-  }, [refresh]);
+    load(true);
+  }, [load]);
 
   const addTicker = useCallback((ticker: string) => {
     setTickers((prev) => [...prev, ticker]);
