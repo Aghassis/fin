@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Watchlist from "@/components/Watchlist";
 
@@ -93,6 +93,70 @@ describe("Watchlist", () => {
 
     expect(await screen.findByText("TSLA")).toBeInTheDocument();
     expect(api.addTicker).toHaveBeenCalledWith("TSLA");
+  });
+
+  it("keeps a ticker added while the initial load is still in flight", async () => {
+    // The GET was issued before the POST, so its response cannot contain the
+    // new ticker. Resolving it must not wipe out the optimistic row (fin-8hh).
+    let resolveLoad: (items: { ticker: string }[]) => void = () => {};
+    vi.mocked(api.getWatchlist).mockReturnValue(
+      new Promise((resolve) => {
+        resolveLoad = resolve;
+      })
+    );
+
+    const { container } = render(
+      <Watchlist
+        prices={{}}
+        priceHistory={{}}
+        selectedTicker={null}
+        onSelectTicker={vi.fn()}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Add ticker");
+    fireEvent.change(input, { target: { value: "snap" } });
+    await waitFor(() => expect(input).toHaveValue("snap"));
+    fireEvent.click(within(container).getByRole("button", { name: "+" }));
+
+    expect(await screen.findByText("SNAP")).toBeInTheDocument();
+
+    resolveLoad([{ ticker: "AAPL" }, { ticker: "GOOGL" }]);
+
+    expect(await screen.findByText("AAPL")).toBeInTheDocument();
+    expect(screen.getByText("GOOGL")).toBeInTheDocument();
+    expect(screen.getByText("SNAP")).toBeInTheDocument();
+  });
+
+  it("does not duplicate a ticker the initial load also returns", async () => {
+    let resolveLoad: (items: { ticker: string }[]) => void = () => {};
+    vi.mocked(api.getWatchlist).mockReturnValue(
+      new Promise((resolve) => {
+        resolveLoad = resolve;
+      })
+    );
+
+    const { container } = render(
+      <Watchlist
+        prices={{}}
+        priceHistory={{}}
+        selectedTicker={null}
+        onSelectTicker={vi.fn()}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Add ticker");
+    fireEvent.change(input, { target: { value: "aapl" } });
+    await waitFor(() => expect(input).toHaveValue("aapl"));
+    fireEvent.click(within(container).getByRole("button", { name: "+" }));
+
+    // Flush the load inside act() so the merge has definitely applied — a bare
+    // waitFor would pass on the pre-merge render even if the merge duplicated.
+    await act(async () => {
+      resolveLoad([{ ticker: "AAPL" }]);
+    });
+
+    expect(screen.getAllByText("AAPL")).toHaveLength(1);
   });
 
   it("calls onSelectTicker when clicking a row", async () => {

@@ -23,7 +23,15 @@ export default function Watchlist({
 
   useEffect(() => {
     api.getWatchlist().then((items) => {
-      setTickers(items.map((i) => i.ticker));
+      const loaded = items.map((i) => i.ticker);
+      // Merge rather than replace: a ticker added while this fetch was still in
+      // flight is already persisted server-side, but the response was built
+      // before that write and so omits it. Replacing would drop the row for
+      // good — nothing refetches the watchlist afterwards.
+      setTickers((prev) => [
+        ...loaded,
+        ...prev.filter((t) => !loaded.includes(t)),
+      ]);
     }).catch(() => {});
   }, []);
 
