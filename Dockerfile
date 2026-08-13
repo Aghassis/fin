@@ -24,4 +24,6 @@ EXPOSE 8000
 
 WORKDIR /app/backend
 
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# app.server binds one dual-stack socket (both 127.0.0.1 and ::1 reach the app)
+# because Docker publishes the port on both families. Override with HOST/PORT.
+CMD ["uv", "run", "python", "-m", "app.server"]

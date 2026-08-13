@@ -391,6 +391,17 @@ Stage 2: Python 3.12 slim
 
 FastAPI serves the static frontend files and all API routes on port 8000.
 
+### Listening Address
+
+`app.server` starts uvicorn on a single dual-stack socket (`::` with
+`IPV6_V6ONLY` cleared), so both `127.0.0.1` and `::1` reach the app. This is
+required for the `http://localhost:8000` promise in sec. 2: on a dual-stack host
+`localhost` resolves to `::1` first, and Docker publishes the port on both
+families, forwarding the IPv6 side to the container's IPv6 address. An
+IPv4-only listener accepts and then resets those connections, which looks like a
+dead app rather than a wrong address family. Set `HOST=0.0.0.0` to fall back to
+IPv4 on a kernel built without IPv6.
+
 ### Docker Volume
 
 The SQLite database persists via a named Docker volume:
@@ -406,6 +417,11 @@ The `db/` directory in the project root maps to `/app/db` in the container. The 
 **`scripts/start_mac.sh`** (macOS/Linux):
 - Builds the Docker image if not already built (or if `--build` flag passed)
 - Runs the container with the volume mount, port mapping, and `.env` file
+- Publishes the port on both `0.0.0.0` and `[::]`, falling back to IPv4 only on
+  a daemon without IPv6
+- Probes `http://localhost:8000/api/health` over each address family before
+  reporting success, so a bind failure surfaces as an address problem instead of
+  a dead-looking app; exits non-zero with the container logs if it never answers
 - Prints the URL to access the app
 - Optionally opens the browser
 
