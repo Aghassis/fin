@@ -197,6 +197,72 @@ describe("Portfolio Page Integration", () => {
     expect(await screen.findByText("reconnecting")).toBeInTheDocument();
   });
 
+  it("refreshes the watchlist after a chat-driven watchlist change", async () => {
+    vi.mocked(api.getPortfolio).mockResolvedValue({
+      cash_balance: 10000.0,
+      total_value: 10000.0,
+      positions: [],
+    });
+    vi.mocked(api.getWatchlist)
+      .mockResolvedValueOnce([{ ticker: "AAPL" }])
+      .mockResolvedValue([{ ticker: "AAPL" }, { ticker: "PYPL" }]);
+    vi.mocked(api.chat).mockResolvedValue({
+      message: "Adding PYPL to your watchlist.",
+      watchlist_changes: [{ ticker: "PYPL", action: "add" }],
+    });
+
+    render(<Home />);
+
+    expect(await screen.findByText("AAPL")).toBeInTheDocument();
+    expect(screen.queryByText("PYPL")).not.toBeInTheDocument();
+
+    const chatInput = screen.getByPlaceholderText("Message...");
+    fireEvent.change(chatInput, { target: { value: "add PYPL to my watchlist" } });
+    await waitFor(() => expect(chatInput).toHaveValue("add PYPL to my watchlist"));
+    fireEvent.click(screen.getByText("Send"));
+
+    // The badge confirms the backend acted...
+    expect(
+      await screen.findByText("Added PYPL to watchlist")
+    ).toBeInTheDocument();
+    // ...and the watchlist panel re-reads without a page reload.
+    expect(await screen.findByText("PYPL")).toBeInTheDocument();
+  });
+
+  it("adds a watchlist ticker optimistically and rolls back on failure", async () => {
+    vi.mocked(api.getPortfolio).mockResolvedValue({
+      cash_balance: 10000.0,
+      total_value: 10000.0,
+      positions: [],
+    });
+    // Hold the write open so the optimistic row is observable before it fails.
+    let failWrite!: (err: Error) => void;
+    vi.mocked(api.addTicker).mockReturnValue(
+      new Promise((_, reject) => {
+        failWrite = reject;
+      })
+    );
+
+    render(<Home />);
+
+    const input = screen.getByPlaceholderText("Add ticker");
+    fireEvent.change(input, { target: { value: "tsla" } });
+    await waitFor(() => expect(input).toHaveValue("tsla"));
+    fireEvent.click(screen.getByRole("button", { name: "+" }));
+
+    // Optimistic row appears immediately...
+    expect(await screen.findByText("TSLA")).toBeInTheDocument();
+    expect(api.addTicker).toHaveBeenCalledWith("TSLA");
+
+    // ...then disappears when the write fails.
+    await act(async () => {
+      failWrite(new Error("nope"));
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("TSLA")).not.toBeInTheDocument()
+    );
+  });
+
   it("handles API failure gracefully", async () => {
     vi.mocked(api.getPortfolio).mockRejectedValue(new Error("Network error"));
 

@@ -39,10 +39,56 @@ function usePortfolio() {
   return { portfolio, refresh };
 }
 
+function useWatchlist() {
+  const [tickers, setTickers] = useState<string[]>([]);
+
+  const refresh = useCallback(async () => {
+    try {
+      const items = await api.getWatchlist();
+      setTickers(items.map((i) => i.ticker));
+    } catch {
+      // API not available yet
+    }
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data fetch on mount
+    refresh();
+  }, [refresh]);
+
+  const addTicker = useCallback((ticker: string) => {
+    setTickers((prev) => [...prev, ticker]);
+    api.addTicker(ticker).catch(() => {
+      setTickers((prev) => prev.filter((t) => t !== ticker));
+    });
+  }, []);
+
+  const removeTicker = useCallback((ticker: string) => {
+    setTickers((prev) => prev.filter((t) => t !== ticker));
+    api.removeTicker(ticker).catch(() => {
+      setTickers((prev) => [...prev, ticker]);
+    });
+  }, []);
+
+  return { tickers, refresh, addTicker, removeTicker };
+}
+
 export default function Home() {
   const { prices, connectionStatus, priceHistory } = useMarketData();
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const { portfolio, refresh: refreshPortfolio } = usePortfolio();
+  const {
+    tickers,
+    refresh: refreshWatchlist,
+    addTicker,
+    removeTicker,
+  } = useWatchlist();
+
+  // The chat can trade AND edit the watchlist, so both panels must re-read.
+  const refreshData = useCallback(() => {
+    refreshPortfolio();
+    refreshWatchlist();
+  }, [refreshPortfolio, refreshWatchlist]);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
@@ -60,10 +106,13 @@ export default function Home() {
             {/* Watchlist */}
             <Panel title="Watchlist" className="w-64 shrink-0 overflow-auto">
               <Watchlist
+                tickers={tickers}
                 prices={prices}
                 priceHistory={priceHistory}
                 selectedTicker={selectedTicker}
                 onSelectTicker={setSelectedTicker}
+                onAddTicker={addTicker}
+                onRemoveTicker={removeTicker}
               />
             </Panel>
 
@@ -96,7 +145,7 @@ export default function Home() {
         </div>
 
         {/* Chat sidebar */}
-        <ChatPanel onDataRefresh={refreshPortfolio} />
+        <ChatPanel onDataRefresh={refreshData} />
       </div>
     </div>
   );
