@@ -1,38 +1,14 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { MockEventSource } from "./helpers/mocks";
 
-// Mock recharts
-vi.mock("recharts", () => ({
-  ResponsiveContainer: ({ children }: { children: React.ReactNode }) => children,
-  LineChart: ({ children }: { children: React.ReactNode }) => <svg>{children}</svg>,
-  Line: () => null,
-  XAxis: () => null,
-  YAxis: () => null,
-  Tooltip: () => null,
-}));
+vi.mock("recharts", async () => (await import("./helpers/mocks")).rechartsMock());
 
-// Mock lightweight-charts
-vi.mock("lightweight-charts", () => ({
-  createChart: () => ({
-    addLineSeries: () => ({ setData: vi.fn(), update: vi.fn() }),
-    timeScale: () => ({ fitContent: vi.fn() }),
-    applyOptions: vi.fn(),
-    remove: vi.fn(),
-  }),
-  ColorType: { Solid: 0 },
-  LineType: { Simple: 0 },
-}));
+vi.mock("lightweight-charts", async () =>
+  (await import("./helpers/mocks")).lightweightChartsMock()
+);
 
 // Mock EventSource for useMarketData
-class MockEventSource {
-  onopen: (() => void) | null = null;
-  onmessage: ((e: MessageEvent) => void) | null = null;
-  onerror: (() => void) | null = null;
-  close = vi.fn();
-  constructor() {
-    setTimeout(() => this.onopen?.(), 0);
-  }
-}
 vi.stubGlobal("EventSource", MockEventSource);
 
 // Mock api module
@@ -55,6 +31,7 @@ import Home from "@/app/page";
 describe("Portfolio Page Integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    MockEventSource.reset();
     vi.mocked(api.getWatchlist).mockResolvedValue([]);
     vi.mocked(api.getPortfolioHistory).mockResolvedValue([]);
   });
@@ -158,6 +135,66 @@ describe("Portfolio Page Integration", () => {
     await waitFor(() => {
       expect(api.getPortfolio).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it("applies streamed price updates to open positions", async () => {
+    vi.mocked(api.getPortfolio).mockResolvedValue({
+      cash_balance: 8165.4,
+      total_value: 10000.0,
+      positions: [
+        {
+          ticker: "AAPL",
+          quantity: 10,
+          avg_cost: 183.46,
+          current_price: 183.46,
+          unrealized_pnl: 0,
+          pnl_percent: 0,
+        },
+      ],
+    });
+
+    render(<Home />);
+
+    // Stream opens -> header reports the live connection
+    expect(await screen.findByText("connected")).toBeInTheDocument();
+    // Avg cost and current price both start at the REST snapshot value
+    expect(await screen.findAllByText("$183.46")).toHaveLength(2);
+
+    const stream = MockEventSource.last!;
+    expect(stream.url).toBe("/api/stream/prices");
+    expect(stream.readyState).toBe(MockEventSource.OPEN);
+
+    act(() => {
+      stream.emit("price", {
+        ticker: "AAPL",
+        price: 200.0,
+        previous_price: 183.46,
+        timestamp: "2026-01-01T00:00:05Z",
+        direction: "up",
+      });
+    });
+
+    // Positions table re-prices off the streamed quote, not the REST snapshot
+    expect(await screen.findByText("$200.00")).toBeInTheDocument();
+    expect(screen.getByText("+$165.40")).toBeInTheDocument();
+  });
+
+  it("reports a dropped stream as reconnecting", async () => {
+    vi.mocked(api.getPortfolio).mockResolvedValue({
+      cash_balance: 10000.0,
+      total_value: 10000.0,
+      positions: [],
+    });
+
+    render(<Home />);
+
+    expect(await screen.findByText("connected")).toBeInTheDocument();
+
+    act(() => {
+      MockEventSource.last!.emitError();
+    });
+
+    expect(await screen.findByText("reconnecting")).toBeInTheDocument();
   });
 
   it("handles API failure gracefully", async () => {
