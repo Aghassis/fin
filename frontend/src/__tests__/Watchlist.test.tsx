@@ -3,11 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import Watchlist from "@/components/Watchlist";
 
 // Mock recharts to avoid canvas rendering issues
-vi.mock("recharts", () => ({
-  ResponsiveContainer: ({ children }: { children: React.ReactNode }) => children,
-  LineChart: ({ children }: { children: React.ReactNode }) => <svg>{children}</svg>,
-  Line: () => null,
-}));
+vi.mock("recharts", async () => (await import("./helpers/mocks")).rechartsMock());
 
 // Mock api
 vi.mock("@/lib/api", () => ({
@@ -115,6 +111,25 @@ describe("Watchlist", () => {
     const row = await screen.findByText("AAPL");
     fireEvent.click(row);
     expect(onSelect).toHaveBeenCalledWith("AAPL");
+  });
+
+  it("renders a sparkline once a ticker has price history", async () => {
+    vi.mocked(api.getWatchlist).mockResolvedValue([{ ticker: "AAPL" }]);
+
+    const { container } = render(
+      <Watchlist
+        prices={basePrices}
+        priceHistory={{
+          AAPL: [{ price: 149.0 }, { price: 150.25 }],
+        }}
+        selectedTicker={null}
+        onSelectTicker={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText("AAPL")).toBeInTheDocument();
+    // Sparkline renders only with >= 2 points; it pulls in YAxis from recharts
+    expect(container.querySelector("tbody svg")).toBeInTheDocument();
   });
 
   it("renders table column headers", () => {

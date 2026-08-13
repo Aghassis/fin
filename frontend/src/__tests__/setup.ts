@@ -8,3 +8,11 @@ afterEach(() => {
 
 // jsdom doesn't implement scrollTo
 Element.prototype.scrollTo = () => {};
+
+// jsdom doesn't implement ResizeObserver (MainChart observes its container)
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;
