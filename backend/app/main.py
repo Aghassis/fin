@@ -9,8 +9,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.chat import router as chat_router
-from app.database import init_db
-from app.market.provider import create_provider
+from app.database import get_db, init_db
+from app.market.provider import create_provider, set_provider
+from app.market.tracking import tracked_tickers
 from app.market.stream import router as stream_router
 from app.portfolio import router as portfolio_router
 from app.watchlist import router as watchlist_router
@@ -21,12 +22,23 @@ from app.snapshots import start_snapshot_recorder, stop_snapshot_recorder
 async def lifespan(app: FastAPI):
     """Initialize database, start market data provider and snapshot recorder."""
     await init_db()
-    provider = create_provider()
+
+    # Price everything the user already tracks, not just the built-in defaults —
+    # tickers added in a previous run live in the DB.
+    db = await get_db()
+    try:
+        tickers = await tracked_tickers(db)
+    finally:
+        await db.close()
+
+    provider = create_provider(tickers)
+    set_provider(provider)
     await provider.start()
     start_snapshot_recorder()
     yield
     stop_snapshot_recorder()
     await provider.stop()
+    set_provider(None)
 
 
 app = FastAPI(title="FinAlly", lifespan=lifespan)

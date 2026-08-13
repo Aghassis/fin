@@ -37,6 +37,10 @@ class PriceCache:
         self._event.clear()
         return update
 
+    def remove(self, ticker: str) -> None:
+        """Drop a ticker so it stops appearing in the stream. Idempotent."""
+        self._prices.pop(ticker, None)
+
     def get_all(self) -> list[PriceUpdate]:
         """Return latest prices for all tickers."""
         return list(self._prices.values())
