@@ -69,7 +69,11 @@ function useWatchlist() {
 
   const removeTicker = useCallback((ticker: string) => {
     setTickers((prev) => prev.filter((t) => t !== ticker));
-    api.removeTicker(ticker).catch(() => {
+    api.removeTicker(ticker).catch((err: unknown) => {
+      // A 404 means the server does not hold this ticker, so dropping the row
+      // was correct. Rolling it back would resurrect an entry that exists
+      // nowhere but on screen, and nothing would ever clear it.
+      if (err instanceof ApiError && err.status === 404) return;
       setTickers((prev) => [...prev, ticker]);
     });
   }, []);

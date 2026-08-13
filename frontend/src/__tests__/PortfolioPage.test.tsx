@@ -307,6 +307,39 @@ describe("Portfolio Page Integration", () => {
     expect(screen.getByText("AAPL")).toBeInTheDocument();
   });
 
+  it("keeps a row gone when the remove is rejected as already absent", async () => {
+    vi.mocked(api.getPortfolio).mockResolvedValue({
+      cash_balance: 10000.0,
+      total_value: 10000.0,
+      positions: [],
+    });
+    vi.mocked(api.getWatchlist).mockResolvedValue([{ ticker: "AAPL" }]);
+    let failWrite!: (err: Error) => void;
+    vi.mocked(api.removeTicker).mockReturnValue(
+      new Promise((_, reject) => {
+        failWrite = reject;
+      })
+    );
+
+    render(<Home />);
+
+    expect(await screen.findByText("AAPL")).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByTitle("Remove")[0]);
+
+    await waitFor(() => expect(screen.queryByText("AAPL")).toBeNull());
+    expect(api.removeTicker).toHaveBeenCalledWith("AAPL");
+
+    // The server never had it — the chat removed it first, or this is a
+    // double-click — so the DELETE comes back 404.
+    await act(async () => {
+      failWrite(new ApiError(404, "AAPL not in watchlist"));
+    });
+
+    // The optimistic removal was correct, so the rollback must not resurrect it.
+    expect(screen.queryByText("AAPL")).toBeNull();
+  });
+
   it("handles API failure gracefully", async () => {
     vi.mocked(api.getPortfolio).mockRejectedValue(new Error("Network error"));
 
