@@ -11,8 +11,9 @@ vi.mock("lightweight-charts", async () =>
 // Mock EventSource for useMarketData
 vi.stubGlobal("EventSource", MockEventSource);
 
-// Mock api module
-vi.mock("@/lib/api", () => ({
+// Mock api calls, but keep the real ApiError so status-aware branches are exercised
+vi.mock("@/lib/api", async () => ({
+  ...(await vi.importActual<typeof import("@/lib/api")>("@/lib/api")),
   api: {
     getPortfolio: vi.fn(),
     trade: vi.fn(),
@@ -25,7 +26,7 @@ vi.mock("@/lib/api", () => ({
   apiFetch: vi.fn(),
 }));
 
-import { api } from "@/lib/api";
+import { api, ApiError, type WatchlistItem } from "@/lib/api";
 import Home from "@/app/page";
 
 describe("Portfolio Page Integration", () => {
@@ -261,6 +262,49 @@ describe("Portfolio Page Integration", () => {
     await waitFor(() =>
       expect(screen.queryByText("TSLA")).not.toBeInTheDocument()
     );
+  });
+
+  it("keeps a row the server already owns when the add is rejected as duplicate", async () => {
+    vi.mocked(api.getPortfolio).mockResolvedValue({
+      cash_balance: 10000.0,
+      total_value: 10000.0,
+      positions: [],
+    });
+    // Hold the initial load open so the add guard still sees an empty list.
+    let finishLoad!: (items: WatchlistItem[]) => void;
+    vi.mocked(api.getWatchlist).mockReturnValue(
+      new Promise((resolve) => {
+        finishLoad = resolve;
+      })
+    );
+    let failWrite!: (err: Error) => void;
+    vi.mocked(api.addTicker).mockReturnValue(
+      new Promise((_, reject) => {
+        failWrite = reject;
+      })
+    );
+
+    render(<Home />);
+
+    const input = screen.getByPlaceholderText("Add ticker");
+    fireEvent.change(input, { target: { value: "aapl" } });
+    await waitFor(() => expect(input).toHaveValue("aapl"));
+    fireEvent.click(screen.getByRole("button", { name: "+" }));
+
+    expect(await screen.findByText("AAPL")).toBeInTheDocument();
+    expect(api.addTicker).toHaveBeenCalledWith("AAPL");
+
+    // The load lands, supplying the row the server already had...
+    await act(async () => {
+      finishLoad([{ ticker: "AAPL" }]);
+    });
+    // ...and the now-redundant write comes back 409.
+    await act(async () => {
+      failWrite(new ApiError(409, "AAPL already in watchlist"));
+    });
+
+    // The server owns AAPL, so the rollback must not delete it.
+    expect(screen.getByText("AAPL")).toBeInTheDocument();
   });
 
   it("handles API failure gracefully", async () => {

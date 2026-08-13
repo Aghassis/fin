@@ -1,5 +1,16 @@
 const BASE = "/api";
 
+/** Request failure that carries the HTTP status, so callers can branch on it. */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, body: string) {
+    super(`API ${status}: ${body}`);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 export async function apiFetch<T>(
   path: string,
   init?: RequestInit,
@@ -9,7 +20,7 @@ export async function apiFetch<T>(
     ...init,
   });
   if (!res.ok) {
-    throw new Error(`API ${res.status}: ${await res.text()}`);
+    throw new ApiError(res.status, await res.text());
   }
   return res.json();
 }
