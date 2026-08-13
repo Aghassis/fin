@@ -1,21 +1,9 @@
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import Watchlist from "@/components/Watchlist";
 
 // Mock recharts to avoid canvas rendering issues
 vi.mock("recharts", async () => (await import("./helpers/mocks")).rechartsMock());
-
-// Mock api
-vi.mock("@/lib/api", () => ({
-  api: {
-    getWatchlist: vi.fn().mockResolvedValue([]),
-    addTicker: vi.fn().mockResolvedValue({ ticker: "TEST" }),
-    removeTicker: vi.fn().mockResolvedValue(undefined),
-  },
-  apiFetch: vi.fn(),
-}));
-
-import { api } from "@/lib/api";
 
 const basePrices = {
   AAPL: {
@@ -27,62 +15,48 @@ const basePrices = {
   },
 };
 
-describe("Watchlist", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.mocked(api.getWatchlist).mockResolvedValue([]);
-  });
+function renderWatchlist(overrides: Partial<React.ComponentProps<typeof Watchlist>> = {}) {
+  const props = {
+    tickers: [],
+    prices: {},
+    priceHistory: {},
+    selectedTicker: null,
+    onSelectTicker: vi.fn(),
+    onAddTicker: vi.fn(),
+    onRemoveTicker: vi.fn(),
+    ...overrides,
+  };
+  return { props, ...render(<Watchlist {...props} />) };
+}
 
+describe("Watchlist", () => {
   it("renders add ticker input", () => {
-    render(
-      <Watchlist
-        prices={{}}
-        priceHistory={{}}
-        selectedTicker={null}
-        onSelectTicker={vi.fn()}
-      />
-    );
+    renderWatchlist();
     expect(screen.getByPlaceholderText("Add ticker")).toBeInTheDocument();
   });
 
   it("renders the add button", () => {
-    const { container } = render(
-      <Watchlist
-        prices={{}}
-        priceHistory={{}}
-        selectedTicker={null}
-        onSelectTicker={vi.fn()}
-      />
-    );
+    const { container } = renderWatchlist();
     const btn = within(container).getByRole("button", { name: "+" });
     expect(btn).toBeInTheDocument();
   });
 
-  it("renders price data when available", async () => {
-    vi.mocked(api.getWatchlist).mockResolvedValue([{ ticker: "AAPL" }]);
+  it("renders the tickers it is given", () => {
+    renderWatchlist({ tickers: ["AAPL", "MSFT"], prices: basePrices });
 
-    render(
-      <Watchlist
-        prices={basePrices}
-        priceHistory={{}}
-        selectedTicker={null}
-        onSelectTicker={vi.fn()}
-      />
-    );
+    expect(screen.getByText("AAPL")).toBeInTheDocument();
+    expect(screen.getByText("MSFT")).toBeInTheDocument();
+  });
 
-    expect(await screen.findByText("AAPL")).toBeInTheDocument();
+  it("renders price data when available", () => {
+    renderWatchlist({ tickers: ["AAPL"], prices: basePrices });
+
+    expect(screen.getByText("AAPL")).toBeInTheDocument();
     expect(screen.getByText("150.25")).toBeInTheDocument();
   });
 
   it("adds a ticker via input", async () => {
-    const { container } = render(
-      <Watchlist
-        prices={{}}
-        priceHistory={{}}
-        selectedTicker={null}
-        onSelectTicker={vi.fn()}
-      />
-    );
+    const { container, props } = renderWatchlist();
 
     const input = screen.getByPlaceholderText("Add ticker");
     fireEvent.change(input, { target: { value: "tsla" } });
@@ -91,56 +65,50 @@ describe("Watchlist", () => {
     const addBtn = within(container).getByRole("button", { name: "+" });
     fireEvent.click(addBtn);
 
-    expect(await screen.findByText("TSLA")).toBeInTheDocument();
-    expect(api.addTicker).toHaveBeenCalledWith("TSLA");
+    expect(props.onAddTicker).toHaveBeenCalledWith("TSLA");
+    await waitFor(() => expect(input).toHaveValue(""));
   });
 
-  it("calls onSelectTicker when clicking a row", async () => {
-    vi.mocked(api.getWatchlist).mockResolvedValue([{ ticker: "AAPL" }]);
-    const onSelect = vi.fn();
+  it("ignores a ticker that is already on the list", async () => {
+    const { container, props } = renderWatchlist({ tickers: ["AAPL"] });
 
-    render(
-      <Watchlist
-        prices={basePrices}
-        priceHistory={{}}
-        selectedTicker={null}
-        onSelectTicker={onSelect}
-      />
-    );
+    const input = screen.getByPlaceholderText("Add ticker");
+    fireEvent.change(input, { target: { value: "aapl" } });
+    await waitFor(() => expect(input).toHaveValue("aapl"));
+    fireEvent.click(within(container).getByRole("button", { name: "+" }));
 
-    const row = await screen.findByText("AAPL");
-    fireEvent.click(row);
-    expect(onSelect).toHaveBeenCalledWith("AAPL");
+    expect(props.onAddTicker).not.toHaveBeenCalled();
   });
 
-  it("renders a sparkline once a ticker has price history", async () => {
-    vi.mocked(api.getWatchlist).mockResolvedValue([{ ticker: "AAPL" }]);
+  it("removes a ticker via the row button", () => {
+    const { props } = renderWatchlist({ tickers: ["AAPL"], prices: basePrices });
 
-    const { container } = render(
-      <Watchlist
-        prices={basePrices}
-        priceHistory={{
-          AAPL: [{ price: 149.0 }, { price: 150.25 }],
-        }}
-        selectedTicker={null}
-        onSelectTicker={vi.fn()}
-      />
-    );
+    fireEvent.click(screen.getByTitle("Remove"));
 
-    expect(await screen.findByText("AAPL")).toBeInTheDocument();
+    expect(props.onRemoveTicker).toHaveBeenCalledWith("AAPL");
+  });
+
+  it("calls onSelectTicker when clicking a row", () => {
+    const { props } = renderWatchlist({ tickers: ["AAPL"], prices: basePrices });
+
+    fireEvent.click(screen.getByText("AAPL"));
+    expect(props.onSelectTicker).toHaveBeenCalledWith("AAPL");
+  });
+
+  it("renders a sparkline once a ticker has price history", () => {
+    const { container } = renderWatchlist({
+      tickers: ["AAPL"],
+      prices: basePrices,
+      priceHistory: { AAPL: [{ price: 149.0 }, { price: 150.25 }] },
+    });
+
+    expect(screen.getByText("AAPL")).toBeInTheDocument();
     // Sparkline renders only with >= 2 points; it pulls in YAxis from recharts
     expect(container.querySelector("tbody svg")).toBeInTheDocument();
   });
 
   it("renders table column headers", () => {
-    const { container } = render(
-      <Watchlist
-        prices={{}}
-        priceHistory={{}}
-        selectedTicker={null}
-        onSelectTicker={vi.fn()}
-      />
-    );
+    const { container } = renderWatchlist();
     const thead = container.querySelector("thead")!;
     expect(within(thead).getByText("Ticker")).toBeInTheDocument();
     expect(within(thead).getByText("Price")).toBeInTheDocument();

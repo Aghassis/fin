@@ -2,47 +2,35 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { PriceUpdate } from "@/hooks/useMarketData";
-import { api } from "@/lib/api";
 import Sparkline from "./Sparkline";
 
 interface WatchlistProps {
+  tickers: string[];
   prices: Record<string, PriceUpdate>;
   priceHistory: Record<string, { price: number }[]>;
   selectedTicker: string | null;
   onSelectTicker: (ticker: string) => void;
+  onAddTicker: (ticker: string) => void;
+  onRemoveTicker: (ticker: string) => void;
 }
 
 export default function Watchlist({
+  tickers,
   prices,
   priceHistory,
   selectedTicker,
   onSelectTicker,
+  onAddTicker,
+  onRemoveTicker,
 }: WatchlistProps) {
-  const [tickers, setTickers] = useState<string[]>([]);
   const [newTicker, setNewTicker] = useState("");
-
-  useEffect(() => {
-    api.getWatchlist().then((items) => {
-      setTickers(items.map((i) => i.ticker));
-    }).catch(() => {});
-  }, []);
 
   const addTicker = useCallback(() => {
     const t = newTicker.trim().toUpperCase();
     if (!t || tickers.includes(t)) return;
-    setTickers((prev) => [...prev, t]);
     setNewTicker("");
-    api.addTicker(t).catch(() => {
-      setTickers((prev) => prev.filter((x) => x !== t));
-    });
-  }, [newTicker, tickers]);
-
-  const removeTicker = useCallback((ticker: string) => {
-    setTickers((prev) => prev.filter((t) => t !== ticker));
-    api.removeTicker(ticker).catch(() => {
-      setTickers((prev) => [...prev, ticker]);
-    });
-  }, []);
+    onAddTicker(t);
+  }, [newTicker, tickers, onAddTicker]);
 
   return (
     <div className="flex h-full flex-col">
@@ -85,7 +73,7 @@ export default function Watchlist({
                 history={priceHistory[ticker] ?? []}
                 selected={ticker === selectedTicker}
                 onSelect={() => onSelectTicker(ticker)}
-                onRemove={() => removeTicker(ticker)}
+                onRemove={() => onRemoveTicker(ticker)}
               />
             ))}
           </tbody>

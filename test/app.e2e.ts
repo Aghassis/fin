@@ -350,6 +350,34 @@ test.describe("AI Chat", () => {
     ).toHaveCount(0);
   });
 
+  test("a watchlist change made in chat lands in the watchlist panel", async ({
+    page,
+  }) => {
+    await openApp(page);
+
+    // The suite shares one database, so start from a known state.
+    const pypl = watchlistRow(page, "PYPL");
+    if ((await pypl.count()) > 0) {
+      await pypl.getByTitle("Remove").click();
+      await expect(pypl).toHaveCount(0);
+    }
+
+    await page.getByPlaceholder("Message...").fill("add PYPL to my watchlist");
+    await page.getByRole("button", { name: "Send" }).click();
+
+    await expect(page.getByText("Adding PYPL to your watchlist.")).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page.getByText("Added PYPL to watchlist")).toBeVisible();
+
+    // The panel re-reads on its own — no reload required (fin-sz9).
+    await expect(pypl).toBeVisible({ timeout: 20_000 });
+
+    // And it was a real server-side write, not just optimistic UI.
+    await page.reload();
+    await expect(pypl).toBeVisible({ timeout: 20_000 });
+  });
+
   test("chat panel collapses and expands", async ({ page }) => {
     await page.goto("/");
 
